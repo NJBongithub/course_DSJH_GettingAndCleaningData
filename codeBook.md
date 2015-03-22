@@ -1,10 +1,10 @@
-#h1 CodeBook
+# CodeBook
 
-#h2 Original Data
+## Original Data
 
 The data is a subset of accelerometer readings from the Samsung Galaxy S smartphone of several volunteers in a study by Anguita et al. (2012). The data is available at http://archive.ics.uci.edu/ml/datasets/Human+Activity+Recognition+Using+Smartphones
 
-#h3 Study Design
+### Study Design
  
 As described on http://archive.ics.uci.edu/ml/datasets/Human+Activity+Recognition+Using+Smartphones):
 
@@ -21,15 +21,53 @@ For each record in the dataset it is provided:
 
 For further reference: Davide Anguita, Alessandro Ghio, Luca Oneto, Xavier Parra and Jorge L. Reyes-Ortiz. (Dec 2012.) Human Activity Recognition on Smartphones using a Multiclass Hardware-Friendly Support Vector Machine. International Workshop of Ambient Assisted Living (IWAAL 2012). Vitoria-Gasteiz, Spain.
 
-#h2 Data Acquisition
+## Environment Set-Up
+
+Libraries are loaded.
+
+```{r}
+if (!require("stringr")){
+    install.packages("stringr", dependencies=TRUE)
+}
+
+library("stringr")
+
+if (!require("reshape2")){
+    install.packages("reshape", dependencies=TRUE)
+}
+
+library("reshape2")
+
+if (!require("plyr")){
+    install.packages("reshape", dependencies=TRUE)
+}
+
+library("plyr")
+```
+
+## Data Acquisition
 
 The script downloads and unzips a data folder from a UCI website (https://d396qusza40orc.cloudfront.net/getdata%2Fprojectfiles%2FUCI%20HAR%20Dataset.zip).
 
 The data folder is called "data UCI HAR" and contains several files. Certain files contain training data and others contain test data. Furthermore, certain files contain variable labels, others contain subject identifiers, and others contain measurements. 
 
-#h2 Data Transformation
+```{r}
+if(!file.exists("dataset.zip")){
+    download.file(url='https://d396qusza40orc.cloudfront.net/getdata%2Fprojectfiles%2FUCI%20HAR%20Dataset.zip' ,destfile="dataset.zip")
+}
 
-#h3 Consolidation of measurement data files
+unzip("dataset.zip")
+
+if(!file.exists("UCI HAR Dataset")){
+    stop("Failed to get the data. Program is stopping.")
+}
+
+setwd("UCI HAR Dataset")
+```
+
+## Data Transformation
+
+### Consolidation of measurement data files
 - Files features.txt, train/X_train.txt, and test/X_test.txt are loaded as data tables. 
 - The features file contains english-language terms that describe each column in the X_ tables. 
 - The X_ files contain measurements for different subjects and activities. 
@@ -44,30 +82,63 @@ test <- read.table("test/X_test.txt", header=FALSE, col.names=variableNames)
 mergedData <- rbind(train, test)
 ```
 
-#h3 Filtering of measurement data
+### Filtering of measurement data
 
 Only mean and standard deviation values are kept. Other columns are dropped. 
 
+```{r}
 subsetData <- mergedData[, grep("*\\.(mean|std)\\..*", names(mergedData), value=T)]
+```
 
-#h3 Other data are prepared
+### Other data are prepared
 
-The subject files train\subject_train.txt and test\subject_test.txt are loaded as are the activity files train\y_train.txt and test\y_test.txt. Training and test files of the same type are combined with rbind(). 
+The subject files train\subject_train.txt and test\subject_test.txt are loaded as are the activity files train\y_train.txt and test\y_test.txt. 
 
-#h3 Use of Descriptive language for activity labels
+Training and test files of the same type are combined with rbind(). 
+
+```{r}
+variableNames <- c("subject")
+subjectTrain <- read.table("train/subject_train.txt", header=FALSE, col.names=variableNames)
+subjectTest <- read.table("test/subject_test.txt", header=FALSE, col.names=variableNames)
+mergedSubjects <- rbind(subjectTrain, subjectTest)
+
+variableNames <- c("activity")
+activityTrain <- read.table("train/y_train.txt", header=FALSE, col.names=variableNames)
+activityTest <- read.table("test/y_test.txt", header=FALSE, col.names=variableNames)
+mergedActivities <- rbind(activityTrain, activityTest)
+```
+
+### Use of Descriptive language for activity labels
 
 Until now, activity labels were numbered from 1 to 6. The file activity_labels.txt has English language descriptions for each number. 
 Now the script replaces these numbers in subsetData with their respective descriptive labels. 
 
-#h3 Further consolidation
+```{r}
+variableNames <- read.table("activity_labels.txt", header=FALSE, col.names=c("activity", "activityName"))
+relabeledActivities <- merge(mergedActivities, variableNames, by="activity", sort=F)
+relabeledActivities <- relabeledActivities[, 2]
+```
+
+### Further consolidation
 
 The files that contain subject ids, those that contain activity descriptions and those that contain performance measurements are now combined with cbind().
 
-#h3 Improvement to variable names.
+```{r}
+df <- cbind(mergedSubjects, relabeledActivities, subsetData)
+```
+
+### Improvement to variable names.
 
 The variable names are simplified using regular expressions. For instance fBodyAccJerk.mean...Z. becomes f.body.acc.jerk.mean.z. The variables are listed below.
 
-#h3 A second, independent tidy data set with the average of each variable for each activity and each subject.
+```{r}
+colnames(df) <- tolower(str_replace_all(colnames(df), "([A-Z]{1})", ".\\1")) #separate capitalized strings by ".", then cast everything to lower case
+colnames(df) <- str_replace_all(colnames(df), "[\\.]+", ".") #replace successive "." with single "."
+colnames(df) <- str_replace_all(colnames(df), "[\\.]+$", "") #remove dot at the end of the string
+colnames(df) <- str_replace_all(colnames(df), "relabeled.activities", "activity") 
+```
+
+### A second, independent tidy data set with the average of each variable for each activity and each subject.
 
 The tidy file is then reduced by computing mean scores BY subject AND activity for each measurement device.
 
@@ -76,11 +147,23 @@ Specifically:
 - The ddplyr function from the plyr package is used to compute the mean score for each unique combination of subject, activity and measurement device.
 - The resulting summary file is then recast using dcast from the reshape2 package so that each measurement occupies its own column.
 
-#h3 File export
+```{r}
+meltedData <- melt(df, id=c("subject","activity")) #make the data long
+summarizedData <- ddply(meltedData, c("subject", "activity", "variable"), summarise, mean = mean(value)) #compute mean by 3 factors
+tidyMeans <- dcast(summarizedData, subject + activity ~ variable, value.var="mean") #make mean data wide
+```
+
+### File export
 
 The recast summary file is saved as tidyMeans.txt alongside the script.
 
-#h2 Variables
+```{r}
+setwd("~/..")
+setwd("Desktop/LIFE/Courses/Coursera/DSJH/3_Getting and Cleaning Data/A")
+write.table(tidyMeans, file="tidyMeans.txt", quote=FALSE, row.name=FALSE)
+```
+
+## Variables
 
 The following is a table representing the variables of the tidy dataset. They are provided as they appear in the dataset. Variable subject is the participant anonymous code from the original experiment. It is an integer number ranging from 0 to 30. Variable activity is a categorical variable of the activity performed by the participants. Its value is one from the set {LAYING, SITTING, STANDING, WALKING, WALKING_DOWNSTAIRS, WALKING_UPSTAIRS}.`
 
